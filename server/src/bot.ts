@@ -14,6 +14,11 @@ type AddReminderMessage = {
   seconds: number;
 };
 
+type AddReminderNoTimeMessage = {
+  kind: "add-reminder-no-time";
+  text: string;
+};
+
 type ListRemindersMessage = {
   kind: "list-reminders";
 };
@@ -27,15 +32,22 @@ type ClearReminderMessage = {
   id: number;
 };
 
+type Time = {
+  kind: "time";
+  seconds: number;
+};
+
 type UnknownMessage = {
   kind: "unknown";
 };
 
 type Message = HelpMessage
              | AddReminderMessage
+             | AddReminderNoTimeMessage
              | ListRemindersMessage
              | ClearAllRemindersMessage
              | ClearReminderMessage
+             | Time
              | UnknownMessage;
 
 // Parsing
@@ -67,6 +79,12 @@ const parseMessage = createParser<Message>({
     },
     {
       regexps: [
+        /^(?:remind|tell) me to (?<text>.*)?$/i,
+      ],
+      func: ({text}) => ({ kind: 'add-reminder-no-time', text })
+    },
+    {
+      regexps: [
         /^(?:list|show|tell) (?:(?:me|all|of|my) )*reminders\.?$/i,
       ],
       func: () => ({ kind: "list-reminders" }),
@@ -82,6 +100,21 @@ const parseMessage = createParser<Message>({
         /^(?:clear|delete|remove|forget) (?:reminder )?(?<id>\d+)\.?$/i,
       ],
       func: ({ id }) => ({ kind: "clear-reminder", id: Number(id) }),
+    },
+    {
+      regexps: [
+        /^in (?<quantity>\d+|a|an) (?<unit>(?:second|minute|hour)s?)\.?$/i,
+      ],
+      func: ({quantity, unit }) => {
+        let seconds = quantity.startsWith("a") ? 1 : Number(quantity);
+
+        if (unit.toLowerCase().startsWith("minute")) {
+          seconds *= 60;
+        } else if (unit.toLowerCase().startsWith("hour")) {
+          seconds *= 3600;
+        }
+        return { kind: "time", seconds};
+      },
     },
   ],
   fallback: { kind: "unknown" },
@@ -106,10 +139,17 @@ type Reminder = {
   timeout: NodeJS.Timeout;
 };
 
+type ReminderInfo = {
+  id: number;
+  date: Date | undefined;
+  text: string | undefined;
+}
+
 type State = {
   ws: WebSocket;
   reminders: Reminder[];
   nextId: number;
+  currentReminder : ReminderInfo;
 };
 
 function executeMessage(state: State, message: Message) {
@@ -140,7 +180,43 @@ function executeMessage(state: State, message: Message) {
       return `Ok, I will remind you to ${text} in ${seconds} ${unit}.`;
     };
 
-  case "list-reminders": {
+    case "add-reminder-no-time": {
+      const text = message.text
+        .replace(/\bmy\b/g, 'your')
+        .replace(/\bme\b/g, 'you');
+
+        const id = state.nextId++;
+        state.currentReminder.id = id;
+        state.currentReminder.text = text;
+
+        return `When should I remind you to ${text}\?`;
+    };
+
+    case "time": {
+      const seconds = message.seconds;
+
+      const id = state.currentReminder.id;
+
+      const date = new Date();
+      date.setSeconds(date.getSeconds() + seconds);
+      state.currentReminder.date = date;
+
+      const text = state.currentReminder.text;
+
+      const timeout = setTimeout(() => {
+        state.ws.send(`It is time to ${text}!`);
+        state.reminders = state.reminders.filter((r) => r.id !== id);
+      }, seconds * 1000);
+
+      if (text) {
+        state.reminders.push({ id, date, text, timeout });
+      }
+
+      const unit = seconds === 1 ? 'second' : 'seconds';
+      return `Ok, I will remind you to ${text} in ${seconds} ${unit}.`;
+    };
+
+    case "list-reminders": {
     if (state.reminders.length === 0) {
       return "You have no reminders.";
     }
@@ -203,7 +279,7 @@ function clearAllReminders(state: State) {
 // Websocket wrapper
 
 export default (ws: WebSocket) => {
-  const state: State = { nextId: 1, reminders: [], ws };
+  const state: State = { nextId: 1, reminders: [], ws, currentReminder: <ReminderInfo> {}};
 
   ws.on('message', (rawMessage) => {
     const message = parseMessage(rawMessage.toString());
