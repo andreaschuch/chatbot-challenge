@@ -77,8 +77,8 @@ const parseMessage = createParser<Message>({
         /^(?:remind|tell) me (?:about|of) (?:the|my) (?<text>.*) in (?<quantity>\d+|a|an) (?<unit>(?:second|minute|hour)s?)\.?$/i,
         /^in (?<quantity>\d+|a|an) (?<unit>(?:second|minute|hour)s?),? (?:remind|tell) me (?:about|of) (?:the|my) (?<text>.*)\.?$/i,
       ],
-      func: ({quantity, unit }) => {
-        return { kind: "add-reminder", seconds: parseTimeWithUnitAsSeconds(quantity, unit)};
+      func: ({quantity, text, unit }) => {
+        return { kind: "add-reminder", text: text, seconds: parseTimeWithUnitAsSeconds(quantity, unit)};
       },
     },
     {
