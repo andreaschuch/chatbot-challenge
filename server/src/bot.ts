@@ -195,7 +195,7 @@ function executeMessage(state: State, message: Message) {
           return `Ok, I will remind you about your ${text} in ${seconds} seconds.`;
         }
 
-        return `How long does ${text} take\?`;
+        return `How long does your ${text} take\?`;
     };
 
     case "time": {
