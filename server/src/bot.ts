@@ -4,6 +4,13 @@ import { createParser } from './parser';
 
 // Message definitions
 
+enum TimeUnits {
+  none = "none",
+  seconds = "second",
+  minutes = "minute",
+  hours = "hour"
+}
+
 type HelpMessage = {
   kind: "help";
 };
@@ -11,7 +18,8 @@ type HelpMessage = {
 type AddReminderMessage = {
   kind: "add-reminder";
   text: string;
-  seconds: number;
+  quantity: number;
+  unit: TimeUnits ;
 };
 
 type AddReminderNoTimeMessage = {
@@ -34,8 +42,14 @@ type ClearReminderMessage = {
 
 type Time = {
   kind: "time";
-  seconds: number;
+  quantity: number;
+  unit: TimeUnits ;
 };
+
+type Confirm = {
+  kind: "confirm";
+  confirm: Boolean;
+}
 
 type UnknownMessage = {
   kind: "unknown";
@@ -48,21 +62,36 @@ type Message = HelpMessage
              | ClearAllRemindersMessage
              | ClearReminderMessage
              | Time
+             | Confirm
              | UnknownMessage;
 
 // Parsing
 
-const parseTimeWithUnitAsSeconds = function(quantity: string, unit: string) {
-  let seconds = quantity.startsWith("a") ? 1 : Number(quantity);
+const parseQuantity = function (quantity: string)
+{
+  return quantity.startsWith("a") ? 1 : Number(quantity);
+}
 
-  if (unit.toLowerCase().startsWith("minute")) {
-    seconds *= 60;
+const parseUnit = function (unit:string) {
+  if (unit.toLowerCase().startsWith("sec")) {
+    return TimeUnits.seconds
+  } else if (unit.toLowerCase().startsWith("min")) {
+    return TimeUnits.minutes
   } else if (unit.toLowerCase().startsWith("hour")) {
-    seconds *= 3600;
+    return TimeUnits.hours
   }
+  return TimeUnits.none
+}
 
+const convertDurationToSeconds = function(quantity: number, unit: TimeUnits) {
+  let seconds = quantity
+  switch (unit)
+  {
+    case TimeUnits.minutes: seconds *= 60;
+    case TimeUnits.hours: seconds *= 3600;
+  }
   return seconds;
-};
+}
 
 const parseMessage = createParser<Message>({
   intents: [
@@ -74,16 +103,16 @@ const parseMessage = createParser<Message>({
     },
     {
       regexps: [
-        /^(?:remind|tell) me (?:about|of) (?:the|my) (?<text>.*) in (?<quantity>\d+|a|an) (?<unit>(?:second|minute|hour)s?)\.?$/i,
-        /^in (?<quantity>\d+|a|an) (?<unit>(?:second|minute|hour)s?),? (?:remind|tell) me (?:about|of) (?:the|my) (?<text>.*)\.?$/i,
+        /^(?:remind|tell) me (?:about|of) (?:(?:the|my) )*(?<text>.*) in (?<quantity>\d+|a|an) (?<unit>(?:second|minute|hour)s?)\.?$/i,
+        /^in (?<quantity>\d+|a|an) (?<unit>(?:second|minute|hour)s?),? (?:remind|tell) me (?:about|of) (?:(?:the|my) ) (?<text>.*)\.?$/i,
       ],
       func: ({quantity, text, unit }) => {
-        return { kind: "add-reminder", text: text, seconds: parseTimeWithUnitAsSeconds(quantity, unit)};
+        return { kind: "add-reminder", text: text, quantity : parseQuantity(quantity), unit: parseUnit(unit)};
       },
     },
     {
       regexps: [
-        /^(?:remind|tell) me (?:about|of) (?:the|my) (?<text>.*)?$/i,
+        /^(?:remind|tell) me (?:about|of) (?:(?:the|my) )*(?<text>.*)?$/i,
       ],
       func: ({text}) => ({ kind: 'add-reminder-no-time', text })
     },
@@ -110,7 +139,23 @@ const parseMessage = createParser<Message>({
         /^(?:(?:it takes) )*(?<quantity>\d+|a|an) (?<unit>(?:second|minute|hour)s?)\.?$/i,
       ],
       func: ({quantity, unit }) => {
-        return { kind: "time", seconds: parseTimeWithUnitAsSeconds(quantity, unit)};
+        return { kind: "time", quantity : parseQuantity(quantity), unit: parseUnit(unit)};
+      },
+    },
+    {
+      regexps: [
+        /^(?:yes|sure|yeah|ok|okay)\.?$/i,
+      ],
+      func: () => {
+        return ({ kind: "confirm", confirm: true});
+      },
+    },
+    {
+      regexps: [
+        /^(?:no|nope|nevermind)\.?$/i,
+      ],
+      func: () => {
+      return ({ kind: "confirm", confirm: false});
       },
     },
   ],
@@ -138,7 +183,8 @@ type Reminder = {
 
 type ReminderInfo = {
   id: number;
-  date: Date | undefined;
+  quantity: number | undefined;
+  unit: TimeUnits | undefined;
   text: string | undefined;
 }
 
@@ -159,69 +205,97 @@ function executeMessage(state: State, message: Message) {
     }
 
     case "add-reminder": {
-      const seconds = message.seconds;
+      const quantity = message.quantity;
+      const timeUnit = message.unit;
       const text = message.text
         .replace(/\bmy\b/g, 'your')
         .replace(/\bme\b/g, 'you');
 
       const id = state.nextId++;
+      state.currentReminder.id = id;
+      state.currentReminder.text = text;
+      state.currentReminder.quantity = quantity;
+      state.currentReminder.unit = timeUnit;
 
       const date = new Date();
+      const seconds = convertDurationToSeconds(quantity, timeUnit);
       date.setSeconds(date.getSeconds() + seconds);
 
       const timeout = setTimeout(() => {
         state.ws.send(`It is time for your ${text}!`);
+        if (!state.storage.has(text)) {
+          state.ws.send(`Should I remember that ${text} takes ${seconds} seconds?`);
+        }
         state.reminders = state.reminders.filter((r) => r.id !== id);
       }, seconds * 1000);
 
       state.reminders.push({ id, date, text, timeout });
-      state.storage.set(text, seconds);
 
       const unit = seconds === 1 ? 'second' : 'seconds';
       return `Ok, I will remind you about ${text} in ${seconds} ${unit}.`;
-    };
+    }
 
     case "add-reminder-no-time": {
       const text = message.text
         .replace(/\bmy\b/g, 'your')
         .replace(/\bme\b/g, 'you');
 
-        const id = state.nextId++;
-        state.currentReminder.id = id;
-        state.currentReminder.text = text;
+      const id = state.nextId++;
+      state.currentReminder.id = id;
+      state.currentReminder.text = text;
 
-        if (state.storage.has(text)) {
-          const seconds = state.storage.get(text);
-          return `Ok, I will remind you about your ${text} in ${seconds} seconds.`;
-        }
-
+      var seconds = undefined;
+      if (state.storage.has(text)) {
+        seconds = state.storage.get(text);
+      }
+      if (!seconds) {
         return `How long does your ${text} take\?`;
-    };
+      } else {
+          const date = new Date();
+          date.setSeconds(date.getSeconds() + seconds);
+
+          const timeout = setTimeout(() => {
+            state.ws.send(`It is time for your ${text}!`);
+            state.reminders = state.reminders.filter((r) => r.id !== id);
+          }, seconds * 1000);
+          state.reminders.push({ id, date, text, timeout });
+
+          const unit = seconds === 1 ? 'second' : 'seconds';
+          return `Ok, I will remind you about ${text} in ${seconds} ${unit}.`;
+      }
+    }
 
     case "time": {
-      const seconds = message.seconds;
+      const quantity = message.quantity;
+      const timeUnit = message.unit;
 
+      state.currentReminder.quantity = quantity;
+      state.currentReminder.unit = timeUnit;
+
+      const seconds = convertDurationToSeconds(quantity, timeUnit)
       const id = state.currentReminder.id;
-
       const date = new Date();
       date.setSeconds(date.getSeconds() + seconds);
-      state.currentReminder.date = date;
 
       const text = state.currentReminder.text;
 
       const timeout = setTimeout(() => {
         state.ws.send(`It is time for your ${text}!`);
+        if (text) {
+          if (!state.storage.has(text)) {
+            state.ws.send(`Should I remember that ${text} takes ${seconds} seconds?`);
+          }
+        }
         state.reminders = state.reminders.filter((r) => r.id !== id);
       }, seconds * 1000);
 
       if (text) {
         state.reminders.push({ id, date, text, timeout });
-        state.storage.set(text, seconds);
       }
 
       const unit = seconds === 1 ? 'second' : 'seconds';
       return `Ok, I will remind you about your ${text} in ${seconds} ${unit}.`;
-    };
+    }
 
     case "list-reminders": {
     if (state.reminders.length === 0) {
@@ -268,6 +342,24 @@ function executeMessage(state: State, message: Message) {
     state.reminders = state.reminders.filter((r) => r !== reminder);
 
     return `Ok, I will not remind you to ${reminder.text}.`;
+  }
+
+  case "confirm": {
+    const confirm = message.confirm;
+    const text = state.currentReminder.text;
+    const quantity = state.currentReminder.quantity;
+    const unit = state.currentReminder.unit;
+    if (text && unit && quantity)
+    {
+      if (confirm){
+        const seconds = convertDurationToSeconds(quantity, unit)
+          state.storage.set(text, seconds);
+        return "Consider it done.";
+        }
+      else {
+        return "Alright, I won't.";
+      }
+    }
   }
 
   case "unknown":
