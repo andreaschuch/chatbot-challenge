@@ -180,7 +180,7 @@ You can also do some bookkeeping:
 Alright, I'm not very sophisticated, yet :-(
 <br>
 <br>  
-But at least I'm smarter than a normal egg timer: <b>I can also remember how long things take. :-)</b>`;
+But at least I'm smarter than a normal egg timer: <b>If you want, I can also remember how long things take. :-)</b>`;
 
 type Reminder = {
   id: number;
