@@ -164,15 +164,23 @@ const parseMessage = createParser<Message>({
 
 // Domain logic
 
-const helpMessage = `I am a reminder bot, here to help you get organized. Here are some of the things you can ask me to do:
-
+const helpMessage = `I am an egg timer bot who can remind you when things are ready.
+For example, I can help when you are making tea, or pizza, or when you want to take a bath...
 <ul>
-  <li>Add reminders, e.g. <tt>remind me to make dinner in 5 minutes</tt>.</li>
+  <li>Add reminders, e.g. <tt>remind me about my tea in 5 minutes</tt>.</li>
+  <li>Or simply <tt>remind me about my pizza</tt>.</li>
+</ul>
+
+You can also do some bookkeeping:
+<ul>
   <li>List reminders, e.g. <tt>show all reminders</tt>.
   <li>Clear reminders, e.g. <tt>clear all reminders</tt> or <tt>clear reminder 3</tt>.
 </ul>
 
-At the moment I am not very sophisticated, but maybe you can help make me better!`;
+Alright, I'm not very sophisticated, yet :-(
+<br>
+<br>  
+But at least I'm smarter than a normal egg timer: <b>I can also remember how long things take. :-)</b>`;
 
 type Reminder = {
   id: number;
