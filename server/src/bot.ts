@@ -52,6 +52,18 @@ type Message = HelpMessage
 
 // Parsing
 
+const parseTimeWithUnitAsSeconds = function(quantity: string, unit: string) {
+  let seconds = quantity.startsWith("a") ? 1 : Number(quantity);
+
+  if (unit.toLowerCase().startsWith("minute")) {
+    seconds *= 60;
+  } else if (unit.toLowerCase().startsWith("hour")) {
+    seconds *= 3600;
+  }
+
+  return seconds;
+};
+
 const parseMessage = createParser<Message>({
   intents: [
     {
@@ -65,16 +77,8 @@ const parseMessage = createParser<Message>({
         /^(?:remind|tell) me (?:about|of) (?:the|my) (?<text>.*) in (?<quantity>\d+|a|an) (?<unit>(?:second|minute|hour)s?)\.?$/i,
         /^in (?<quantity>\d+|a|an) (?<unit>(?:second|minute|hour)s?),? (?:remind|tell) me (?:about|of) (?:the|my) (?<text>.*)\.?$/i,
       ],
-      func: ({ text, quantity, unit }) => {
-        let seconds = quantity.startsWith("a") ? 1 : Number(quantity);
-
-        if (unit.toLowerCase().startsWith("minute")) {
-          seconds *= 60;
-        } else if (unit.toLowerCase().startsWith("hour")) {
-          seconds *= 3600;
-        }
-
-        return { kind: "add-reminder", seconds, text };
+      func: ({quantity, unit }) => {
+        return { kind: "add-reminder", seconds: parseTimeWithUnitAsSeconds(quantity, unit)};
       },
     },
     {
@@ -106,14 +110,7 @@ const parseMessage = createParser<Message>({
         /^(?:(?:it takes) )*(?<quantity>\d+|a|an) (?<unit>(?:second|minute|hour)s?)\.?$/i,
       ],
       func: ({quantity, unit }) => {
-        let seconds = quantity.startsWith("a") ? 1 : Number(quantity);
-
-        if (unit.toLowerCase().startsWith("minute")) {
-          seconds *= 60;
-        } else if (unit.toLowerCase().startsWith("hour")) {
-          seconds *= 3600;
-        }
-        return { kind: "time", seconds};
+        return { kind: "time", seconds: parseTimeWithUnitAsSeconds(quantity, unit)};
       },
     },
   ],
