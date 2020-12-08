@@ -193,8 +193,8 @@ type State = {
   ws: WebSocket;
   reminders: Reminder[];
   nextId: number;
-  currentReminder : ReminderInfo;
-  storage: Map<string, number>;
+  dialogHistory : ReminderInfo[];
+  userModel: Map<string, number>;
 };
 
 
@@ -212,10 +212,7 @@ function executeMessage(state: State, message: Message) {
         .replace(/\bme\b/g, 'you');
 
       const id = state.nextId++;
-      state.currentReminder.id = id;
-      state.currentReminder.text = text;
-      state.currentReminder.quantity = quantity;
-      state.currentReminder.unit = timeUnit;
+      state.dialogHistory.push(<ReminderInfo>({id:id, quantity:quantity, unit:timeUnit, text:text}));
 
       const date = new Date();
       const seconds = convertDurationToSeconds(quantity, timeUnit);
@@ -223,7 +220,7 @@ function executeMessage(state: State, message: Message) {
 
       const timeout = setTimeout(() => {
         state.ws.send(`It is time for your ${text}!`);
-        if (!state.storage.has(text)) {
+        if (!state.userModel.has(text)) {
           state.ws.send(`Should I remember that ${text} takes ${seconds} seconds?`);
         }
         state.reminders = state.reminders.filter((r) => r.id !== id);
@@ -241,12 +238,12 @@ function executeMessage(state: State, message: Message) {
         .replace(/\bme\b/g, 'you');
 
       const id = state.nextId++;
-      state.currentReminder.id = id;
-      state.currentReminder.text = text;
+
+      state.dialogHistory.push(<ReminderInfo>({id:id, text:text}));
 
       var seconds = undefined;
-      if (state.storage.has(text)) {
-        seconds = state.storage.get(text);
+      if (state.userModel.has(text)) {
+        seconds = state.userModel.get(text);
       }
       if (!seconds) {
         return `How long does your ${text} take\?`;
@@ -269,32 +266,37 @@ function executeMessage(state: State, message: Message) {
       const quantity = message.quantity;
       const timeUnit = message.unit;
 
-      state.currentReminder.quantity = quantity;
-      state.currentReminder.unit = timeUnit;
+      if (state.dialogHistory.length === 0){
+        return "I'm sorry, I don't understand what you mean.";
+      } else {
+          var currentReminder = state.dialogHistory[state.dialogHistory.length-1]
+          currentReminder.quantity = quantity;
+          currentReminder.unit = timeUnit;
 
-      const seconds = convertDurationToSeconds(quantity, timeUnit)
-      const id = state.currentReminder.id;
-      const date = new Date();
-      date.setSeconds(date.getSeconds() + seconds);
+          const seconds = convertDurationToSeconds(quantity, timeUnit)
+          const id = currentReminder.id;
+          const date = new Date();
+          date.setSeconds(date.getSeconds() + seconds);
 
-      const text = state.currentReminder.text;
+          const text = currentReminder.text;
 
-      const timeout = setTimeout(() => {
-        state.ws.send(`It is time for your ${text}!`);
-        if (text) {
-          if (!state.storage.has(text)) {
-            state.ws.send(`Should I remember that ${text} takes ${seconds} seconds?`);
+          const timeout = setTimeout(() => {
+            state.ws.send(`It is time for your ${text}!`);
+            if (text) {
+              if (!state.userModel.has(text)) {
+                state.ws.send(`Should I remember that ${text} takes ${seconds} seconds?`);
+              }
+            }
+            state.reminders = state.reminders.filter((r) => r.id !== id);
+          }, seconds * 1000);
+
+          if (text) {
+            state.reminders.push({ id, date, text, timeout });
           }
+
+          const unit = seconds === 1 ? 'second' : 'seconds';
+          return `Ok, I will remind you about your ${text} in ${seconds} ${unit}.`;
         }
-        state.reminders = state.reminders.filter((r) => r.id !== id);
-      }, seconds * 1000);
-
-      if (text) {
-        state.reminders.push({ id, date, text, timeout });
-      }
-
-      const unit = seconds === 1 ? 'second' : 'seconds';
-      return `Ok, I will remind you about your ${text} in ${seconds} ${unit}.`;
     }
 
     case "list-reminders": {
@@ -345,21 +347,26 @@ function executeMessage(state: State, message: Message) {
   }
 
   case "confirm": {
-    const confirm = message.confirm;
-    const text = state.currentReminder.text;
-    const quantity = state.currentReminder.quantity;
-    const unit = state.currentReminder.unit;
-    if (text && unit && quantity)
-    {
-      if (confirm){
-        const seconds = convertDurationToSeconds(quantity, unit)
-          state.storage.set(text, seconds);
-        return "Consider it done.";
+    if (state.dialogHistory.length === 0){
+      return "I'm sorry, I don't understand what you mean.";
+    } else {
+        var currentReminder = state.dialogHistory[state.dialogHistory.length-1]
+        const confirm = message.confirm;
+        const text = currentReminder.text;
+        const quantity = currentReminder.quantity;
+        const unit = currentReminder.unit;
+        if (text && unit && quantity)
+        {
+          if (confirm){
+            const seconds = convertDurationToSeconds(quantity, unit)
+              state.userModel.set(text, seconds);
+            return "Consider it done.";
+            }
+          else {
+            return "Alright, I won't.";
+          }
         }
-      else {
-        return "Alright, I won't.";
       }
-    }
   }
 
   case "unknown":
@@ -378,7 +385,7 @@ function clearAllReminders(state: State) {
 // Websocket wrapper
 
 export default (ws: WebSocket) => {
-  const state: State = { nextId: 1, reminders: [], ws, currentReminder: <ReminderInfo> {}, storage: new Map()};
+  const state: State = { nextId: 1, reminders: [], ws, dialogHistory: [], userModel: new Map()};
 
   ws.on('message', (rawMessage) => {
     const message = parseMessage(rawMessage.toString());
