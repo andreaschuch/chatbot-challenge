@@ -62,8 +62,8 @@ const parseMessage = createParser<Message>({
     },
     {
       regexps: [
-        /^(?:remind|tell) me to (?<text>.*) in (?<quantity>\d+|a|an) (?<unit>(?:second|minute|hour)s?)\.?$/i,
-        /^in (?<quantity>\d+|a|an) (?<unit>(?:second|minute|hour)s?),? (?:remind|tell) me to (?<text>.*)\.?$/i,
+        /^(?:remind|tell) me (?:about|of) (?:the|my) (?<text>.*) in (?<quantity>\d+|a|an) (?<unit>(?:second|minute|hour)s?)\.?$/i,
+        /^in (?<quantity>\d+|a|an) (?<unit>(?:second|minute|hour)s?),? (?:remind|tell) me (?:about|of) (?:the|my) (?<text>.*)\.?$/i,
       ],
       func: ({ text, quantity, unit }) => {
         let seconds = quantity.startsWith("a") ? 1 : Number(quantity);
@@ -79,7 +79,7 @@ const parseMessage = createParser<Message>({
     },
     {
       regexps: [
-        /^(?:remind|tell) me to (?<text>.*)?$/i,
+        /^(?:remind|tell) me (?:about|of) (?:the|my) (?<text>.*)?$/i,
       ],
       func: ({text}) => ({ kind: 'add-reminder-no-time', text })
     },
@@ -103,7 +103,7 @@ const parseMessage = createParser<Message>({
     },
     {
       regexps: [
-        /^in (?<quantity>\d+|a|an) (?<unit>(?:second|minute|hour)s?)\.?$/i,
+        /^(?:(?:it takes) )*(?<quantity>\d+|a|an) (?<unit>(?:second|minute|hour)s?)\.?$/i,
       ],
       func: ({quantity, unit }) => {
         let seconds = quantity.startsWith("a") ? 1 : Number(quantity);
@@ -145,12 +145,15 @@ type ReminderInfo = {
   text: string | undefined;
 }
 
+
 type State = {
   ws: WebSocket;
   reminders: Reminder[];
   nextId: number;
   currentReminder : ReminderInfo;
+  storage: Map<string, number>;
 };
+
 
 function executeMessage(state: State, message: Message) {
   switch (message.kind) {
@@ -170,14 +173,15 @@ function executeMessage(state: State, message: Message) {
       date.setSeconds(date.getSeconds() + seconds);
 
       const timeout = setTimeout(() => {
-        state.ws.send(`It is time to ${text}!`);
+        state.ws.send(`It is time for your ${text}!`);
         state.reminders = state.reminders.filter((r) => r.id !== id);
       }, seconds * 1000);
 
       state.reminders.push({ id, date, text, timeout });
+      state.storage.set(text, seconds);
 
       const unit = seconds === 1 ? 'second' : 'seconds';
-      return `Ok, I will remind you to ${text} in ${seconds} ${unit}.`;
+      return `Ok, I will remind you about ${text} in ${seconds} ${unit}.`;
     };
 
     case "add-reminder-no-time": {
@@ -189,7 +193,12 @@ function executeMessage(state: State, message: Message) {
         state.currentReminder.id = id;
         state.currentReminder.text = text;
 
-        return `When should I remind you to ${text}\?`;
+        if (state.storage.has(text)) {
+          const seconds = state.storage.get(text);
+          return `Ok, I will remind you about your ${text} in ${seconds} seconds.`;
+        }
+
+        return `When should I remind you about your ${text}\?`;
     };
 
     case "time": {
@@ -204,16 +213,17 @@ function executeMessage(state: State, message: Message) {
       const text = state.currentReminder.text;
 
       const timeout = setTimeout(() => {
-        state.ws.send(`It is time to ${text}!`);
+        state.ws.send(`It is time for your ${text}!`);
         state.reminders = state.reminders.filter((r) => r.id !== id);
       }, seconds * 1000);
 
       if (text) {
         state.reminders.push({ id, date, text, timeout });
+        state.storage.set(text, seconds);
       }
 
       const unit = seconds === 1 ? 'second' : 'seconds';
-      return `Ok, I will remind you to ${text} in ${seconds} ${unit}.`;
+      return `Ok, I will remind you about your ${text} in ${seconds} ${unit}.`;
     };
 
     case "list-reminders": {
@@ -279,7 +289,7 @@ function clearAllReminders(state: State) {
 // Websocket wrapper
 
 export default (ws: WebSocket) => {
-  const state: State = { nextId: 1, reminders: [], ws, currentReminder: <ReminderInfo> {}};
+  const state: State = { nextId: 1, reminders: [], ws, currentReminder: <ReminderInfo> {}, storage: new Map()};
 
   ws.on('message', (rawMessage) => {
     const message = parseMessage(rawMessage.toString());
